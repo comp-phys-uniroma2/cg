@@ -22,7 +22,8 @@ program poisson
   if (iargc()<2) then
     write(*,*) 'poisson N tol [Precond w]'
     write(*,*) 'N: punti griglia 3d NxNxN'    
-    write(*,*) 'Precond: S=SSOR; I=ILU0'
+    write(*,*) 'Precond: J:=Jacobi; S=SSOR; I=ILU0'
+    stop
   end if
 
   call getarg(1,arg)
@@ -34,7 +35,8 @@ program poisson
     call getarg(3,arg)
     read(arg,*) PC
     select case(PC)
-    case('P')
+    case('J')
+    case('S')
       call getarg(4,arg)
       read(arg,*) w
     case('I')
@@ -87,7 +89,7 @@ program poisson
  print*,'Solve'
 
  select case(PC)
- case('S', 'I')
+ case('J', 'S', 'I')
    call pconjgrads(A_csr, rhs, phi, phi, PC, w, tol) 
  case default
    call conjgrads(A_csr, rhs, phi, phi, tol) 

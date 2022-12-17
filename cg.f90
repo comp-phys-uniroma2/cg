@@ -82,6 +82,8 @@ contains
 
     ! select preconditioner
     select case(ip)
+    case('J')
+      call getULD_jacobi(A, w, U, L, D)
     case('S')
       call getULD_ssor(A, w, U, L, D)
     case('I')
@@ -210,6 +212,43 @@ contains
     end do
 
   end subroutine solveU
+
+  ! JACOBI Preconditioner (diagonal of A)
+  ! M_j = D(A) 
+  ! Can be implemented either:
+  ! L=I; D= A^-1; U=I
+  ! or
+  ! L=D(A); D=D(A); U=D(A) 
+  subroutine getULD_jacobi(A, w, U, L, D)
+    type(rCSR), intent(in) :: A   
+    real(dp), intent(in) :: w 
+    type(rCSR), intent(inout) :: U
+    type(rCSR), intent(inout) :: L
+    real(dp), intent(inout) :: D(:) 
+
+    integer :: N, i, j
+
+    N=A%nrow
+    ! create L=Id U=Id and D=A^-1
+    call create(U, N, N)
+    call create(L, N, N)
+    do i = 1, N
+       U%rowpnt(i) = i
+       L%rowpnt(i) = i
+       U%nzval(i) = 1.0_dp 
+       L%nzval(i) = 1.0_dp 
+       U%colind(i) = i
+       L%colind(i) = i
+       do j = A%rowpnt(i), A%rowpnt(i+1) - 1
+         if (A%colind(j) == i) then
+           D(i) = 1.0_dp/A%nzval(j)
+         end if
+       end do
+    end do
+    U%rowpnt(N+1) = N+1
+    L%rowpnt(N+1) = N+1
+
+  end subroutine getULD_jacobi
 
   ! SSOR preconditioner
   ! M_ssor = w/(2-w) [L+D/w] D^-1 [U+D/w]

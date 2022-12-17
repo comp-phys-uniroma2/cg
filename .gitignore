@@ -1,0 +1,4 @@
+*.o
+*.mod
+poisson
+sol.dat
