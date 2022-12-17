@@ -37,6 +37,9 @@ program poisson
     select case(PC)
     case('J')
     case('S')
+      if (iargc()<4) then 
+        stop 'SSOR requires the weight parameter'
+      end if    
       call getarg(4,arg)
       read(arg,*) w
     case('I')
