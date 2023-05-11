@@ -1,7 +1,7 @@
 
 FC = gfortran
-FCOPT = -O2 -fmax-errors=3
-#LIBS = -L../lapack-3.8.0 -llapack -lrefblas
+FCOPT = -O2 -fmax-errors=3 
+LIBS = -L../../lapack/lapack-3.9.1 -llapack -lrefblas
 SOURCES = $(wildcard *.f90)
 OBJS = $(SOURCES:.f90=.o)
 
@@ -17,7 +17,7 @@ poisson.o: cg.o matdef.o adj_map.o precision.o sparsealg.o
 matdef.o: precision.o
 sparsealg.o: precision.o matdef.o
 cg.o: precision.o matdef.o sparsealg.o
-
+gmres.o: precision.o matdef.o sparsealg.o
 
 $(TARGET): $(OBJS)
 	$(FC) -o $(TARGET) $(OBJS) $(LIBS)

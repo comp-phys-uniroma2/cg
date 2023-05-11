@@ -4,24 +4,28 @@ program poisson
   use matdef
   use adj_map
   use cg
+  use gmres_solver
   implicit none
 
   integer :: N 
   type(adjlist), allocatable :: graph(:)
   real(dp), allocatable :: phi(:), rhs(:)
-  real(dp) :: L, dx, tol, w
+  real(dp) :: L, dx, tol, w, error
   real(dp), parameter :: Pi = 3.141593_dp
   integer :: node, nnodes, nnz, i, j, k, nn, fd
   type(rCSR) :: A_csr
   character(64) :: arg
   character(1) :: PC ! preconditioner type
+  character(1) :: solver ! solver 
   
   !|---+---+---+---|
   !1   2   3   4   5
 
-  if (iargc()<2) then
-    write(*,*) 'poisson N tol [Precond w]'
-    write(*,*) 'N: punti griglia 3d NxNxN'    
+  if (iargc()<3) then
+    write(*,*) 'poisson N tol solver [Precond w]'
+    write(*,*) 'N: punti griglia 3d NxNxN' 
+    write(*,*) 'tol: tolerance (e.g. 1e-5)'
+    write(*,*) 'solver: C:=CG or G:=GMRES'   
     write(*,*) 'Precond: J:=Jacobi; S=SSOR; I=ILU0'
     stop
   end if
@@ -30,17 +34,19 @@ program poisson
   read(arg,*) N
   call getarg(2,arg)
   read(arg,*) tol
+  call getarg(3,arg)
+  read(arg,*) solver
   ! Read optional preconditioner
-  if (iargc()>2) then
-    call getarg(3,arg)
+  if (iargc()>3) then
+    call getarg(4,arg)
     read(arg,*) PC
     select case(PC)
     case('J')
     case('S')
-      if (iargc()<4) then 
+      if (iargc()<5) then 
         stop 'SSOR requires the weight parameter'
       end if    
-      call getarg(4,arg)
+      call getarg(5,arg)
       read(arg,*) w
     case('I')
     case default
@@ -60,6 +66,7 @@ program poisson
   call create(A_csr, nnodes, nnz)
 
   print*,'Init Matrices'
+
   k = 0
   A_csr%rowpnt(1) = 1
   do i = 1, nnodes
@@ -75,7 +82,8 @@ program poisson
     A_csr%rowpnt(i+1) = k + 1 
  end do
 
- print*,k,nnz
+ print*,"Number of nodes:",nnodes
+ print*,"Non zeros:",k, nnz
 
  allocate(rhs(nnodes))
  allocate(phi(nnodes))
@@ -83,21 +91,28 @@ program poisson
  rhs = 0.0_dp
  phi = 0.0_dp
 
- print*, nint(L/10/dx)
+ print*,"Capacitor lenght: ", nint(L/10/dx)
  rhs(coo2node(N/2, N/2, N/2+nint(L/5/dx))) = -4.0_dp * Pi * 14.4 / dx
  rhs(coo2node(N/2, N/2, N/2+nint(L/5/dx))) = 3.0_dp *4.0_dp * Pi * 14.4 / dx 
  rhs(coo2node(N/2, N/2-nint(L/5/dx),N/2)) = -4.0_dp * Pi * 14.4 / dx
  rhs(coo2node(N/2, N/2-nint(L/5/dx),N/2)) = -4.0_dp * Pi * 14.4 / dx 
 
- print*,'Solve'
 
- select case(PC)
- case('J', 'S', 'I')
-   call pconjgrads(A_csr, rhs, phi, phi, PC, w, tol) 
- case default
-   call conjgrads(A_csr, rhs, phi, phi, tol) 
- end select 
- 
+ select case(Solver)
+ case('C')
+   print*,'Solve using CG' 
+   select case(PC)
+   case('J', 'S', 'I')
+     call pconjgrads(A_csr, rhs, phi, phi, PC, w, tol) 
+   case default
+     call conjgrads(A_csr, rhs, phi, phi, tol) 
+   end select 
+ case('G') 
+   print*,'Solve using GMRES' 
+   call allocate_gmres_stuff(nnodes, 100)
+   call gmres(A_csr, rhs, phi, 100, tol, error)
+ end select
+
  open(newunit=fd, file='sol.dat')
 
  do i = 1, N
