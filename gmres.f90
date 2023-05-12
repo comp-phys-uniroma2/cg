@@ -6,8 +6,7 @@ module gmres_solver
   
   public :: gmres, allocate_gmres_stuff 
   
-  real(dp), dimension(:), allocatable      :: r, cs, sn, e1, beta_gmres, error_gmres, y_gmres, tmp_v
-  real(dp), dimension(:,:), allocatable    :: mQ, mH, temp_var, tmp_m
+  real(dp), dimension(:,:), allocatable    :: mQ, mH 
   
   contains
 
@@ -15,15 +14,6 @@ module gmres_solver
     integer, intent(in) :: vecsize
     integer, intent(in) :: max_iter 
         
-    allocate(          r(vecsize))
-    allocate(      tmp_v(vecsize))
-    allocate(         cs(max_iter))
-    allocate(         sn(max_iter))
-    allocate(error_gmres(max_iter))
-    allocate(    y_gmres(max_iter))
-    allocate(         e1(max_iter+1))
-    allocate( beta_gmres(max_iter+1))
-    allocate(   temp_var(max_iter+1,2))
     allocate(         mQ(vecsize,max_iter))
     allocate(         mH(vecsize,max_iter))
    
@@ -35,7 +25,7 @@ module gmres_solver
   ! Generalized Minimal Residual
   subroutine gmres(A_in, b_in, x_out, Iter_in, threshold_in, error)
     
-    real(dp), dimension(:), intent(out) :: x_out
+    real(dp), dimension(:), intent(inout) :: x_out
     real(dp), dimension(:), intent(in)  :: b_in
     type(rCSR), intent(in)              :: A_in
     integer, intent(in)                 :: Iter_in
@@ -46,142 +36,150 @@ module gmres_solver
     integer                             :: k, i, info 
     real(dp)                            :: b_norm, r_norm
     integer, allocatable                :: ipv(:)
+    real(dp), allocatable               :: beta(:), tmp_v(:), r(:)
+    real(dp), allocatable               :: tmp_m(:,:) 
+    real(dp), allocatable               :: cs(:), sn(:), y_gmres(:)
     
-    
+    allocate(beta(Iter_in+1))
+    allocate(cs(Iter_in))
+    allocate(sn(Iter_in))
+    allocate(tmp_v(size(mQ,1)))
+    allocate(r(size(mQ,1)))
+
     print *, "======================="
     print *, "starting GMRES solver  "
     print *, "======================="
     print *,""
     
-    cs = 0.0_dp
-    e1 = 0.0_dp
-    e1(1) = 1.0_dp
-    
-    call matvec(A_in,x_out,tmp_v)
-    
-    r = b_in - tmp_v
-    
-    b_norm = norm2(b_in)
-    
-    error_gmres = norm2(r) / b_norm
-    
-    r_norm       = norm2(r)
-    mQ(:,1)      = r/r_norm
-    beta_gmres(1) = r_norm
-    
     mH = 0.0_dp
     mQ = 0.0_dp
     
-    print*, "start iterations and error minimization"
+    cs = 0.0_dp
+    sn = 0.0_dp
+    beta = 0.0_dp
     
-    do k = 1, Iter_in
-      
-      call arnoldi(A_in, mQ, k, temp_var)
-      
-      print*,k,maxval(abs(temp_var))
+    call matvec(A_in,x_out,tmp_v)
+    r = b_in - tmp_v
+    b_norm = norm2(b_in)
+    b_norm = 1.0_dp
+    r_norm = norm2(r)
+    error = r_norm / b_norm
+    print*,'residual error:', error
 
-      mH(1:k+1,k)   = temp_var(:,1)
-      mQ(    :,k+1) = temp_var(:,2)
-      
-      
-      ! eliminate the last element in H ith row and update the rotation matrix
-      call apply_givens_rotation(mH(1:k+1,k), cs, sn, k , cs(k), sn(k))
-     
-      print*,'cs sn:',cs(k), sn(k) 
-      
-      ! Residual vector update
-      beta_gmres(k+1) = -sn(k)*beta_gmres(k)
-      beta_gmres(k)   =  cs(k)*beta_gmres(k)
-      error_gmres(k+1) = abs(beta_gmres(k+1))/b_norm
-    
-      error = error_gmres(k+1)
-      print*,'error:',error 
-      if (error <= threshold_in) then
-        exit
-      end if
-      
-    end do
-    
-    print *, "done"
-    print *,""
-    
-    print *, "solving system with DGESV"
-    
-    allocate(tmp_m(Iter_in, Iter_in))
-    allocate(ipv(Iter_in))
-    tmp_m = mH(1:Iter_in,1:Iter_in)
-    y_gmres = beta_gmres
-    call dgesv(Iter_in, 1, tmp_m, Iter_in, ipv, y_gmres, Iter_in, info) 
-    
-    if (info /= 0) then
-       print*, "Error in solver: ",info
-       error = info
-       return 
-    end if 
+    do while (error > threshold_in)
 
-    deallocate(ipv)
-    deallocate(tmp_m)
+       mQ(:,1)      = r/r_norm
+       beta(1)      = r_norm
+  
+       do k = 1, Iter_in-1
+        
+         ! operates on mH and mQ 
+         call arnoldi(A_in, k)
+         
+         ! eliminate the last element in H ith row and update the rotation matrix
+         call apply_givens_rotation(cs, sn, k)
+        
+         !if (isnan(cs(k))) stop 
+         ! Residual vector update
+         beta(k+1) = -sn(k)*beta(k)
+         beta(k)   =  cs(k)*beta(k)
+         error = abs(beta(k+1))/b_norm
+       
+         print*,k, 'error:', error 
+         if (error <= threshold_in) then
+           exit
+         end if
+         
+       end do
+ 
+       if (error >= threshold_in) then 
+          k = k - 1
+       end if
 
-    print *, "done"
-    print *, ""
+       print *, "done"
+       print *,""
+       print *, "solving system with DGESV"
+       
+       allocate(tmp_m(k, k))
+       allocate(ipv(k))
+       allocate(y_gmres(k))
+       tmp_m = mH(1:k,1:k)
+       y_gmres = beta(1:k)
+       call dgesv(k, 1, tmp_m, k, ipv, y_gmres, k, info) 
+       
+       if (info /= 0) then
+          print*, "Error in solver: ",info
+          error = info
+          return 
+       end if 
+  
+       ! !$OMP PARALLEL, public(mQ, y_gmres, x_out, Iter_in), private(i)
+       ! !$OMP DO
+       do i = 1, size(x_out)
+         x_out(i)= x_out(i) + dot_product(mQ(i,1:k), y_gmres(1:k)) 
+       end do
+       ! !$OMP END DO
+       ! !$OMP END PARALLEL
+       deallocate(tmp_m)
+       deallocate(ipv)
+       deallocate(y_gmres)
+      
+       ! cross check the residual: 
+       call matvec(A_in,x_out,tmp_v)
+       r = b_in - tmp_v
+       r_norm = norm2(r)
+       error = r_norm / b_norm
+       print*,'residual error:', error
+    
+    end do   
 
-    print *, "outputting result"
-    
-    
-    !$OMP PARALLEL, public(mQ, y_gmres, x_out, Iter_in), private(i)
-    !$OMP DO
-    do i = 1, size(x_out)
-      x_out(i)= x_out(i) + dot_product(mQ(i,1:Iter_in), y_gmres)
-    end do
-    !$OMP END DO
-    !$OMP END PARALLEL
+    deallocate(sn,cs)
+    deallocate(beta)
+    deallocate(tmp_v)
+    deallocate(r)
     print *, "done!"
     print *, ""
     
   end subroutine
-  
-  subroutine arnoldi(A_in,Q_in,k_in, Mout)
+
+
+  ! --------------------------------------------------------------------- 
+  subroutine arnoldi(A_in, k_in)
     
-    real(dp), dimension(:,:), intent(out)  :: Mout
-    real(dp), dimension(:,:), intent(in)   :: Q_in
     type(rCSR), intent(in)                 :: A_in
     integer, intent(in)                    :: k_in
-    real(dp), dimension(:), allocatable    :: q, h
+    
+    real(dp), dimension(:), allocatable    :: q
+    real(dp)                               :: q_norm
     integer                                :: i
-    integer, dimension(0:1)                :: Qsize
+    integer                                :: Qsize
     
-    Qsize = shape(Q_in)
-    print*,'(arnoldi) Qsize:',Qsize 
-    allocate(q(Qsize(0)))
-    allocate(h(Qsize(0)))
-    
-    ! Krylov vector
-    
-    call matvec(A_in, Q_in(:,k_in), q)
+    Qsize = size(mQ, 1)
+    allocate(q(Qsize))
+   
+    ! new Krylov vector 
+    call matvec(A_in, mQ(:,k_in), q)
     
     ! Modified Gram-Schmidt, keeping the Hessenberg matrix
     do i = 1, k_in
-      h(i) = dot_product(q, Q_in(:,i))
-      q    = q - h(i)*Q_in(:,i)
+      mH(i, k_in) = dot_product(q(:), mQ(:,i))
+      q(:)    = q(:) - mH(i, k_in)*mQ(:,i)
     end do
     
-    h(k_in) = norm2(q)
-    q = q/norm2(q)
-    
-    Mout(:,1) = h
-    Mout(:,2) = q
+    q_norm = norm2(q)
+    mH(k_in+1, k_in) = q_norm
+    mQ(:, k_in+1) = q(:) / q_norm
     
     deallocate(q)
-    deallocate(h)
     
   end subroutine
-
+  ! ---------------------------------------------------------------------
   subroutine givens_rotation(v1,v2,cs_out,sn_out)
   
-    real(dp)              :: t
-    real(dp), intent(out) :: cs_out,  sn_out
     real(dp), intent(in)  :: v1,v2
+    real(dp), intent(out) :: cs_out,  sn_out
     
+    real(dp)              :: t
     t=sqrt(v1**2 + v2**2)
     
     cs_out = v1/t
@@ -189,34 +187,31 @@ module gmres_solver
     
   end subroutine
   
-  subroutine apply_givens_rotation(h_io, cs_in, sn_in, k_in, cs_k, sn_k)
+  ! ---------------------------------------------------------------------
+  subroutine apply_givens_rotation(cs, sn, k)
     
-    real(dp), dimension(:), intent(out) :: h_io
-    real(dp), intent(out)               :: cs_k,  sn_k
-    real(dp), dimension(:), intent(in)  :: cs_in, sn_in
-    integer, intent(in)                 :: k_in
-    real(dp)                            :: temp
-    integer                             :: i
+    real(dp), dimension(:), intent(inout)  :: cs, sn
+    integer, intent(in)                 :: k
     
-    !applied to i-th column
-    
-    do i = 1, k_in-1
-      
-      temp      =  cs_in(i)*h_io(i) + sn_in(i)*h_io(i + 1)
-      h_io(i+1) = -sn_in(i)*h_io(i) + cs_in(i)*h_io(i + 1)
-      h_io(i)   = temp
-      
+    real(dp)               :: temp
+    integer                :: i
+
+    !applied to i-th column    
+    do i = 1, k-1
+      temp   =  cs(i)*mH(i,k) + sn(i)*mH(i+1,k)
+      mH(i+1,k) = -sn(i)*mH(i,k) + cs(i)*mH(i+1,k)
+      mH(i,k)   = temp
     end do
     
     ! update the next sin cos values for rotation
-    call givens_rotation(h_io(k_in-1),h_io(k_in), cs_k, sn_k)
+    call givens_rotation(mH(k,k), mH(k+1,k), cs(k), sn(k))
     
     ! eliminate H(i,i-1)
-    h_io(k_in) = cs_k*h_io(k_in) + sn_k*h_io(k_in+1)
-    h_io(k_in+1)   = 0.0_dp
+    mH(k,k)   = cs(k)*mH(k,k) + sn(k)*mH(k+1,k)
+    mH(k+1,k) = 0.0_dp
     
   end subroutine
- 
+  ! ---------------------------------------------------------------------
 
  
 end module
