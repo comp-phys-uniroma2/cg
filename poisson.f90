@@ -22,10 +22,11 @@ program poisson
   !1   2   3   4   5
 
   if (iargc()<3) then
-    write(*,*) 'poisson N tol solver [Precond w]'
+    write(*,*) 'poisson N tol solver [maxiter Precond w]'
     write(*,*) 'N: punti griglia 3d NxNxN' 
     write(*,*) 'tol: tolerance (e.g. 1e-5)'
-    write(*,*) 'solver: C:=CG or G:=GMRES'   
+    write(*,*) 'solver: C:=CG or G:=GMRES'
+    write(*,*) 'maxiter: for GMRES is the size of the subspace'   
     write(*,*) 'Precond: J:=Jacobi; S=SSOR; I=ILU0'
     stop
   end if
