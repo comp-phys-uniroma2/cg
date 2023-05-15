@@ -130,7 +130,7 @@ module gmres_solver
        select case(ip)
        case('I') 
          do i = 1, size(x_out)
-           tmp_v(i)= tmp_v(i) + dot_product(mQ(i,1:k), y_gmres(1:k)) 
+           tmp_v(i)= dot_product(mQ(i,1:k), y_gmres(1:k)) 
          end do
          call solveLDU(L,D,U,tmp_v,r)
          x_out = x_out + r        
@@ -166,22 +166,21 @@ module gmres_solver
     integer, intent(in)                    :: k_in
     real(dp), intent(in)                   :: D(:)
     
-    real(dp), dimension(:), allocatable    :: q, v
+    real(dp), dimension(:), allocatable    :: q, z 
     real(dp)                               :: q_norm
     integer                                :: i
     integer                                :: Qsize
     
     Qsize = size(mQ, 1)
     allocate(q(Qsize))
-    allocate(v(Qsize))
+    allocate(z(Qsize))
     
-    v = mQ(:,k_in)
-    call solveLDU(L,D,U,v,mQ(:,k_in))        
-    deallocate(v)
+    call solveLDU(L,D,U,mQ(:,k_in),z)        
 
     ! new Krylov vector 
-    call matvec(A_in, mQ(:,k_in), q)
+    call matvec(A_in, z, q)
     
+    deallocate(z)
     ! Modified Gram-Schmidt, keeping the Hessenberg matrix
     do i = 1, k_in
       mH(i, k_in) = dot_product(q(:), mQ(:,i))

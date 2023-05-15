@@ -12,7 +12,7 @@ program poisson
   real(dp), allocatable :: phi(:), rhs(:)
   real(dp) :: L, dx, tol, w, error
   real(dp), parameter :: Pi = 3.141593_dp
-  integer :: node, nnodes, nnz, i, j, k, nn, fd
+  integer :: node, nnodes, nnz, i, j, k, nn, fd, maxiter
   type(rCSR) :: A_csr
   character(64) :: arg
   character(1) :: PC ! preconditioner type
@@ -36,22 +36,33 @@ program poisson
   read(arg,*) tol
   call getarg(3,arg)
   read(arg,*) solver
+  maxiter=30
   ! Read optional preconditioner
   if (iargc()>3) then
-    call getarg(4,arg)
-    read(arg,*) PC
-    select case(PC)
-    case('J')
-    case('S')
-      if (iargc()<5) then 
-        stop 'SSOR requires the weight parameter'
-      end if    
-      call getarg(5,arg)
-      read(arg,*) w
-    case('I')
-    case default
-      stop 'invalid preconditioner'
-    end select    
+    i = 3
+    if (solver == 'G') then    
+      i = i + 1
+      call getarg(i,arg)  
+      read(arg,*) maxiter
+    end if 
+    if (iargc()>i) then
+      i = i + 1
+      call getarg(i,arg)
+      read(arg,*) PC
+      select case(PC)
+      case('J')
+      case('S')
+        if (iargc()<i+1) then 
+          stop 'SSOR requires the weight parameter'
+        end if    
+        i = i + 1
+        call getarg(i,arg)
+        read(arg,*) w
+      case('I')
+      case default
+        stop 'invalid preconditioner'
+      end select    
+    end if  
   end if
 
   L = 1.0_dp
@@ -109,8 +120,8 @@ program poisson
    end select 
  case('G') 
    print*,'Solve using GMRES' 
-   call allocate_gmres_stuff(nnodes, 30)
-   call gmres(A_csr, rhs, phi, 30, tol, PC, error)
+   call allocate_gmres_stuff(nnodes, maxiter)
+   call gmres(A_csr, rhs, phi, maxiter, tol, PC, error)
  end select
 
  open(newunit=fd, file='sol.dat')

@@ -266,23 +266,18 @@ module preconditioners
     type(rMSR) :: LU
     integer :: i, j, N, kl, ku, colindj
 
-    print*,'create LU'    
     call create(LU, A%nrow, A%nnz+1)
 
-    print*,'compute ilu0'    
     call ilu0(A, LU)
 
-    print*,'compute D'    
     N = A%nrow
     do i = 1, N
       D(i) = 1.0_dp/LU%nzval(i)
     end do
 
-    print*,'create L,U'    
     call create(U, N, (A%nnz-N)/2 + N)
     call create(L, N, (A%nnz-N)/2 + N)
 
-    print*,'compute L,U'    
     U%rowpnt(1) = 1
     L%rowpnt(1) = 1
     kl = 0; ku = 0;
