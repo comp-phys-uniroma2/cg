@@ -13,11 +13,11 @@ all: $(TARGET)
 clean:
 	rm *.o *.mod $(TARGET)
 
-poisson.o: cg.o matdef.o adj_map.o precision.o sparsealg.o
+poisson.o: cg.o matdef.o adj_map.o precision.o sparsealg.o gmres.o
 matdef.o: precision.o
 sparsealg.o: precision.o matdef.o
-cg.o: precision.o matdef.o sparsealg.o
-gmres.o: precision.o matdef.o sparsealg.o
+cg.o: precision.o matdef.o preconditioners.o sparsealg.o
+gmres.o: precision.o matdef.o sparsealg.o preconditioners.o
 
 $(TARGET): $(OBJS)
 	$(FC) -o $(TARGET) $(OBJS) $(LIBS)

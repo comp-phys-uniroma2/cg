@@ -110,7 +110,7 @@ program poisson
  case('G') 
    print*,'Solve using GMRES' 
    call allocate_gmres_stuff(nnodes, 30)
-   call gmres(A_csr, rhs, phi, 30, tol, error)
+   call gmres(A_csr, rhs, phi, 30, tol, PC, error)
  end select
 
  open(newunit=fd, file='sol.dat')

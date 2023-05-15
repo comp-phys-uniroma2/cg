@@ -1,6 +1,7 @@
 module gmres_solver
   use precision
   use matdef
+  use preconditioners
   use sparsealg
   implicit none
   
@@ -23,28 +24,29 @@ module gmres_solver
   
   ! --------------------------------------------------------------------
   ! Generalized Minimal Residual
-  subroutine gmres(A_in, b_in, x_out, Iter_in, threshold_in, error)
+  subroutine gmres(A_in, b_in, x_out, Iter_in, threshold_in, ip, error)
     
     real(dp), dimension(:), intent(inout) :: x_out
     real(dp), dimension(:), intent(in)  :: b_in
     type(rCSR), intent(in)              :: A_in
     integer, intent(in)                 :: Iter_in
     real(dp), intent(in)                :: threshold_in
+    character, intent(in)               :: ip
     real(dp), intent(inout)             :: error
 
 
     integer                             :: k, i, info 
     real(dp)                            :: b_norm, r_norm
-    integer, allocatable                :: ipv(:)
-    real(dp), allocatable               :: beta(:), tmp_v(:), r(:)
-    real(dp), allocatable               :: tmp_m(:,:) 
-    real(dp), allocatable               :: cs(:), sn(:), y_gmres(:)
+    real(dp), allocatable               :: beta(:), v(:), tmp_v(:), r(:)
+    real(dp), allocatable               :: cs(:), sn(:), y_gmres(:), D(:)
+    type(rCSR)                          :: U, L
     
     allocate(beta(Iter_in+1))
     allocate(cs(Iter_in))
     allocate(sn(Iter_in))
     allocate(tmp_v(size(mQ,1)))
     allocate(r(size(mQ,1)))
+    allocate(D(A_in%nrow))
 
     print *, "======================="
     print *, "starting GMRES solver  "
@@ -58,23 +60,35 @@ module gmres_solver
     sn = 0.0_dp
     beta = 0.0_dp
     
-    call matvec(A_in,x_out,tmp_v)
+    call matvec(A_in, x_out, tmp_v)
     r = b_in - tmp_v
     b_norm = norm2(b_in)
     b_norm = 1.0_dp
     r_norm = norm2(r)
     error = r_norm / b_norm
     print*,'residual error:', error
+   
+    select case(ip)   
+    case('I')
+      call getULD_ilu0(A_in, U, L, D)
+    case default  
+    end select
 
     do while (error > threshold_in)
 
-       mQ(:,1)      = r/r_norm
-       beta(1)      = r_norm
+       mQ(:,1) = r/r_norm
+       beta(1) = r_norm
   
        do k = 1, Iter_in-1
         
-         ! operates on mH and mQ 
-         call arnoldi(A_in, k)
+         ! operates on mH and mQ
+
+         select case(ip)   
+         case('I')
+           call arnoldip(A_in, k, L, U, D)
+         case default 
+           call arnoldi(A_in, k)
+         end select
          
          ! eliminate the last element in H ith row and update the rotation matrix
          call apply_givens_rotation(cs, sn, k)
@@ -98,30 +112,34 @@ module gmres_solver
 
        print *, "done"
        print *,""
-       print *, "solving system with DGESV"
+       print *, "solving Upper diagonal"
        
-       allocate(tmp_m(k, k))
-       allocate(ipv(k))
        allocate(y_gmres(k))
-       tmp_m = mH(1:k,1:k)
-       y_gmres = beta(1:k)
-       call dgesv(k, 1, tmp_m, k, ipv, y_gmres, k, info) 
+
+       !print*,'mH'
+       !do i=1,10
+       !  print*,mH(i,1:k)
+       !end do  
+       call solveU(mH(1:k,1:k), beta(1:k), y_gmres)  
        
-       if (info /= 0) then
-          print*, "Error in solver: ",info
-          error = info
-          return 
-       end if 
-  
-       ! !$OMP PARALLEL, public(mQ, y_gmres, x_out, Iter_in), private(i)
-       ! !$OMP DO
-       do i = 1, size(x_out)
-         x_out(i)= x_out(i) + dot_product(mQ(i,1:k), y_gmres(1:k)) 
-       end do
-       ! !$OMP END DO
-       ! !$OMP END PARALLEL
-       deallocate(tmp_m)
-       deallocate(ipv)
+       !if (info /= 0) then
+       !   print*, "Error in solver: ",info
+       !   error = info
+       !   return 
+       !end if 
+       select case(ip)
+       case('I') 
+         do i = 1, size(x_out)
+           tmp_v(i)= tmp_v(i) + dot_product(mQ(i,1:k), y_gmres(1:k)) 
+         end do
+         call solveLDU(L,D,U,tmp_v,r)
+         x_out = x_out + r        
+       case default
+         do i = 1, size(x_out)
+           x_out(i)= x_out(i) + dot_product(mQ(i,1:k), y_gmres(1:k)) 
+         end do
+       end select
+
        deallocate(y_gmres)
       
        ! cross check the residual: 
@@ -142,21 +160,25 @@ module gmres_solver
     
   end subroutine
 
-
-  ! --------------------------------------------------------------------- 
-  subroutine arnoldi(A_in, k_in)
+  subroutine arnoldip(A_in, k_in, L, U, D)
     
-    type(rCSR), intent(in)                 :: A_in
+    type(rCSR), intent(in)                 :: A_in, L, U
     integer, intent(in)                    :: k_in
+    real(dp), intent(in)                   :: D(:)
     
-    real(dp), dimension(:), allocatable    :: q
+    real(dp), dimension(:), allocatable    :: q, v
     real(dp)                               :: q_norm
     integer                                :: i
     integer                                :: Qsize
     
     Qsize = size(mQ, 1)
     allocate(q(Qsize))
-   
+    allocate(v(Qsize))
+    
+    v = mQ(:,k_in)
+    call solveLDU(L,D,U,v,mQ(:,k_in))        
+    deallocate(v)
+
     ! new Krylov vector 
     call matvec(A_in, mQ(:,k_in), q)
     
@@ -172,7 +194,39 @@ module gmres_solver
     
     deallocate(q)
     
-  end subroutine
+  end subroutine arnoldip
+
+  ! --------------------------------------------------------------------- 
+  subroutine arnoldi(A_in, k_in)
+    
+    type(rCSR), intent(in)                 :: A_in
+    integer, intent(in)                    :: k_in
+    
+    real(dp), dimension(:), allocatable    :: q
+    real(dp)                               :: q_norm
+    integer                                :: i
+    integer                                :: Qsize
+    
+    Qsize = size(mQ, 1)
+    allocate(q(Qsize))
+
+    ! new Krylov vector 
+    call matvec(A_in, mQ(:,k_in), q)
+    
+    ! Modified Gram-Schmidt, keeping the Hessenberg matrix
+    do i = 1, k_in
+      mH(i, k_in) = dot_product(q(:), mQ(:,i))
+      q(:)    = q(:) - mH(i, k_in)*mQ(:,i)
+    end do
+    
+    q_norm = norm2(q)
+    mH(k_in+1, k_in) = q_norm
+    mQ(:, k_in+1) = q(:) / q_norm
+    
+    deallocate(q)
+    
+  end subroutine arnoldi
+
   ! ---------------------------------------------------------------------
   subroutine givens_rotation(v1,v2,cs_out,sn_out)
   
